@@ -8,6 +8,20 @@ async function api(path, { method = 'GET', body, form } = {}) {
   const r = await fetch('/api/admin' + path, { method, headers: h, body: form || (body ? JSON.stringify(body) : undefined) });
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.details ? j.error + ': ' + j.details.join('; ') : j.error || 'Erro ' + r.status); return j;
 }
+// Upload com barra de progresso (fetch não expõe progresso de envio; XHR sim).
+function upload(path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData(); fd.append('file', file);
+    const x = new XMLHttpRequest(); x.open('POST', '/api/admin' + path); x.setRequestHeader('Authorization', 'Bearer ' + token);
+    x.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded, e.total);
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch { /* ignora */ } x.status < 300 ? (onProgress(file.size, file.size, true), resolve(j)) : reject(new Error(j.error || 'Erro ' + x.status)); };
+    x.onerror = () => reject(new Error('Falha de rede no envio')); x.ontimeout = () => reject(new Error('Tempo esgotado no envio')); x.timeout = 30 * 60 * 1000;
+    x.send(fd);
+  });
+}
+const mb = n => (n / 1048576).toFixed(1) + ' MB';
+const bar = (id, label) => `<div class="up" id="${id}" style="display:none;margin-top:10px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)"><span>${label}</span><span class="pc">0%</span></div><div style="height:10px;background:var(--bg2);border:1px solid var(--line);border-radius:99px;overflow:hidden"><div class="fill" style="height:100%;width:0;background:var(--grad);transition:width .15s"></div></div></div>`;
+const setBar = (id, loaded, total, done) => { const el = $('#' + id); if (!el) return; el.style.display = 'block'; const p = Math.round(loaded / total * 100); el.querySelector('.fill').style.width = p + '%'; el.querySelector('.pc').textContent = done ? '100% ✔' : `${p}% (${mb(loaded)} / ${mb(total)})`; };
 const act = async (fn, ok) => { try { const r = await fn(); if (ok) toast(ok, 'ok'); return r; } catch (e) { toast(e.message, 'err'); } };
 
 async function boot() {
@@ -54,14 +68,21 @@ function gameForm(g = {}) {
   const v = (k, d = '') => esc(g[k] ?? d);
   $('#modal').innerHTML = `<div class="modal"><div class="box" style="width:min(640px,100%)"><h2>${g.id ? 'Editar' : 'Novo'} jogo</h2><div class="fg"><div><label>Título</label><input id="t" value="${v('title')}"></div><div><label>Slug (url)</label><input id="s" value="${v('slug')}" placeholder="kof-98"></div><div><label>Plataforma</label><input id="p" value="${v('platform', 'Neo Geo')}"></div><div><label>Categoria</label><input id="c" value="${v('category', 'Luta')}"></div><div><label>Ano</label><input id="y" type="number" value="${v('year')}"></div><div><label>Máx. jogadores (1-4)</label><input id="m" type="number" min="1" max="4" value="${v('max_players', 2)}"></div><div><label>Núcleo do emulador</label><input id="e" value="${v('emulator_core', 'fbneo')}"></div><div><label>Status</label><select id="st">${['published', 'draft', 'disabled'].map(s => `<option ${g.status === s || (!g.status && s === 'draft') ? 'selected' : ''} value="${s}">${{ published: 'Ativo (publicado)', draft: 'Rascunho', disabled: 'Desativado' }[s]}</option>`).join('')}</select></div>
   <div class="w"><label>Descrição</label><textarea id="d" rows="2">${v('description')}</textarea></div><div class="w"><label>Arquivos extras (JSON, ex.: {"bios":"neogeo.zip"})</label><input id="f" value='${esc(JSON.stringify(g.emulator_files || {}))}'></div><div class="w"><label>URL da capa (ou envie arquivo abaixo)</label><input id="cu" value="${v('cover_url')}"></div>
-  <div><label>Enviar capa (png/jpg/webp, 3MB)</label><input type="file" id="cf" accept="image/*"></div><div><label>Enviar ROM (zip/7z/neo, 128MB)</label><input type="file" id="rf"></div></div>
+  <div><label>Enviar capa (png/jpg/webp, 3MB)</label><input type="file" id="cf" accept="image/*"></div><div><label>Enviar ROM (zip/7z/neo, 128MB)</label><input type="file" id="rf"></div></div>${bar('pc', 'Capa')}${bar('pr', 'ROM')}
   <label><input type="checkbox" id="ft" style="width:auto" ${g.is_featured ? 'checked' : ''}> Destaque na página inicial</label><div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" id="sv">Salvar</button><button class="btn" id="cx">Cancelar</button></div></div></div>`;
   $('#cx').onclick = () => $('#modal').innerHTML = '';
   $('#sv').onclick = async () => {
     let files; try { files = JSON.parse($('#f').value || '{}'); } catch { return toast('JSON de arquivos inválido', 'err'); }
     const body = { title: $('#t').value.trim(), slug: $('#s').value.trim(), platform: $('#p').value.trim(), category: $('#c').value.trim(), year: $('#y').value ? +$('#y').value : null, max_players: +$('#m').value, emulator_core: $('#e').value.trim(), status: $('#st').value, description: $('#d').value.trim() || null, cover_url: $('#cu').value.trim() || null, emulator_files: files, is_featured: $('#ft').checked };
     const saved = await act(() => api(g.id ? '/games/' + g.id : '/games', { method: g.id ? 'PUT' : 'POST', body })); if (!saved) return;
-    for (const [id, ep] of [['cf', 'cover'], ['rf', 'rom']]) { const f = $('#' + id).files[0]; if (f) { const fd = new FormData(); fd.append('file', f); await act(() => api(`/games/${saved.id}/${ep}`, { method: 'POST', form: fd })); } }
+    $('#sv').disabled = true; $('#cx').disabled = true; let failed = false;
+    for (const [id, ep, barId] of [['cf', 'cover', 'pc'], ['rf', 'rom', 'pr']]) {
+      const f = $('#' + id).files[0]; if (!f) continue; setBar(barId, 0, f.size);
+      try { await upload(`/games/${saved.id}/${ep}`, f, (l, t, d) => setBar(barId, l, t, d)); }
+      catch (e) { failed = true; toast(`Falha no envio (${ep}): ${e.message}`, 'err'); }
+    }
+    $('#sv').disabled = false; $('#cx').disabled = false;
+    if (failed) { games(); return; } // jogo foi salvo; reabra para reenviar o arquivo
     toast('Jogo salvo', 'ok'); $('#modal').innerHTML = ''; games();
   };
 }
@@ -98,11 +119,11 @@ async function audit() { const r = await act(() => api('/audit')); if (r) main(`
 async function settings() {
   const [s, sys] = await Promise.all([act(() => api('/settings')), act(() => api('/system'))]); if (!s) return;
   const num = (k, l) => `<div><label>${l}</label><input data-n="${k}" type="number" value="${s[k]}"></div>`;
-  main(`<h2>Configurações</h2><div class="cols3" style="margin-top:14px"><div class="panel"><h3>Plataforma</h3><label>Nome</label><input id="pn" value="${esc(s.platform_name)}"><label>Logo atual</label><p>${esc(s.logo_url) || 'nenhum'}</p><input type="file" id="lf" accept="image/*"><label>Mensagem de aviso (banner)</label><input id="an" value="${esc(s.announcement)}"><label><input type="checkbox" id="mt" style="width:auto" ${s.maintenance ? 'checked' : ''}> Modo manutenção (bloqueia usuários comuns)</label><label>Mensagem de manutenção</label><input id="mm" value="${esc(s.maintenance_message)}"></div>
+  main(`<h2>Configurações</h2><div class="cols3" style="margin-top:14px"><div class="panel"><h3>Plataforma</h3><label>Nome</label><input id="pn" value="${esc(s.platform_name)}"><label>Logo atual</label><p>${esc(s.logo_url) || 'nenhum'}</p><input type="file" id="lf" accept="image/*">${bar('lp', 'Logo')}<label>Mensagem de aviso (banner)</label><input id="an" value="${esc(s.announcement)}"><label><input type="checkbox" id="mt" style="width:auto" ${s.maintenance ? 'checked' : ''}> Modo manutenção (bloqueia usuários comuns)</label><label>Mensagem de manutenção</label><input id="mm" value="${esc(s.maintenance_message)}"></div>
   <div class="panel"><h3>Limites</h3>${num('max_online_users', 'Máx. usuários online')}${num('max_concurrent_sessions', 'Máx. partidas simultâneas')}${num('max_spectators_per_session', 'Máx. espectadores por partida')}${num('challenge_ttl_seconds', 'Validade do desafio (s)')}${num('reconnect_grace_seconds', 'Janela de reconexão (s)')}${num('max_session_minutes', 'Duração máxima da partida (min)')}</div>
   <div class="panel"><h3>Servidor e banco (somente leitura)</h3>${sys ? `<p>Node ${sys.node} · ${sys.cpus} CPUs · ${sys.memoryMB} MB RSS</p><p>Uptime: ${Math.round(sys.uptimeSec / 60)} min · Ambiente: ${esc(sys.env)}</p><p>Supabase: ${esc(sys.supabaseHost)}</p><p>ROM_DIR: ${esc(sys.romDir)}</p><p>MAX_CONNECTIONS (env): ${sys.maxConnections}</p><p>Origens: ${esc(sys.origins.join(', ') || 'mesma origem')}</p><p style="font-size:12px">Chaves e variáveis de servidor são definidas apenas no .env, nunca pelo navegador.</p>` : ''}</div></div><button class="btn primary" id="sv" style="margin-top:16px">Salvar configurações</button>`);
   $('#sv').onclick = async () => { const body = { platform_name: $('#pn').value, announcement: $('#an').value, maintenance: $('#mt').checked, maintenance_message: $('#mm').value }; document.querySelectorAll('[data-n]').forEach(i => body[i.dataset.n] = +i.value);
-    const f = $('#lf').files[0]; if (f) { const fd = new FormData(); fd.append('file', f); const r = await act(() => api('/logo', { method: 'POST', form: fd })); if (r) body.logo_url = r.logo_url; }
+    const f = $('#lf').files[0]; if (f) { $('#lp').style.display = 'block'; const r = await act(() => upload('/logo', f, (l, t, d) => setBar('lp', l, t, d))); if (r) body.logo_url = r.logo_url; }
     await act(() => api('/settings', { method: 'PUT', body }), 'Configurações salvas'); settings(); };
 }
 boot();

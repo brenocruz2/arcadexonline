@@ -17,19 +17,24 @@ const authed = () => Boolean(S.session);
 
 // ---------- boot ----------
 async function boot() {
+  try { await boot2(); } catch (e) { console.error(e); $('#view').innerHTML = `<div class="panel" style="margin-top:40px"><h2>Não foi possível carregar</h2><p>${esc(e.message)}</p><button class="btn primary" onclick="location.reload()">Tentar de novo</button></div>`; }
+}
+async function boot2() {
   S.cfg = await (await fetch('/api/v1/public-config')).json().catch(() => null);
   if (!S.cfg?.supabaseUrl) { $('#view').innerHTML = '<div class="panel" style="margin-top:40px"><h2>Servidor não configurado</h2><p>Defina SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY no .env do servidor (veja o README).</p></div>'; return; }
   applyBrand();
   S.sb = supabase.createClient(S.cfg.supabaseUrl, S.cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
-  S.sb.auth.onAuthStateChange(async (ev, sess) => {
-    const was = S.token; S.session = sess; S.token = sess?.access_token || null;
-    if (ev === 'PASSWORD_RECOVERY') return recoveryModal();
-    if (S.token && S.token !== was && ev !== 'TOKEN_REFRESHED') { await onLogin(); }
-    else if (ev === 'TOKEN_REFRESHED' && S.socket) S.socket.auth = { token: S.token };
-    if (!sess) { S.profile = null; S.socket?.disconnect(); S.socket = null; renderAuth(); route(); }
+  // IMPORTANTE: o callback não pode chamar métodos do Supabase de forma síncrona/await (deadlock do SDK). Trabalho pesado vai para setTimeout.
+  S.sb.auth.onAuthStateChange((ev, sess) => {
+    S.session = sess; S.token = sess?.access_token || null;
+    if (ev === 'PASSWORD_RECOVERY') return setTimeout(recoveryModal, 0);
+    if (ev === 'TOKEN_REFRESHED') { if (S.socket) S.socket.auth = { token: S.token }; return; }
+    if (ev === 'SIGNED_IN' && sess && S.booted && S.profile?.id !== sess.user.id) return void setTimeout(onLogin, 0);
+    if (ev === 'SIGNED_OUT') setTimeout(() => { S.profile = null; S.socket?.disconnect(); S.socket = null; renderAuth(); route(); }, 0);
   });
   const { data } = await S.sb.auth.getSession(); S.session = data.session; S.token = data.session?.access_token || null;
-  await loadGames(); if (S.token) await onLogin(); else { renderAuth(); }
+  await loadGames(); if (S.token) await onLogin(); else renderAuth();
+  S.booted = true;
   setInterval(refreshPublicStats, 15000); refreshPublicStats();
   addEventListener('hashchange', route); route();
 }
@@ -39,7 +44,7 @@ function applyBrand() {
   const ban = $('#banner'); ban.className = c.maintenance ? 'banner m' : c.announcement ? 'banner' : 'hidden'; ban.textContent = c.maintenance ? c.maintenanceMessage : c.announcement;
 }
 async function onLogin() {
-  try { const r = await api('/session/login-event', { method: 'POST' }); S.role = r.role; } catch (e) { return S.sb.auth.signOut(); }
+  try { const r = await api('/session/login-event', { method: 'POST' }); S.role = r.role; } catch (e) { await S.sb.auth.signOut({ scope: 'local' }); S.session = null; S.token = null; renderAuth(); route(); return; }
   const { data } = await S.sb.from('profiles').select('*').eq('id', S.session.user.id).single(); S.profile = data;
   C.loadRemote(S.sb, S.session.user.id).then(c => { if (c) { S.controls = c; } }).catch(() => {});
   connectSocket(); renderAuth(); route();
@@ -135,12 +140,13 @@ function viewHome() {
   const cats = [...new Set(S.games.map(g => g.category))], plats = [...new Set(S.games.map(g => g.platform))];
   $('#view').innerHTML = `<section class="hero"><div><span class="eyebrow">PLATAFORMA ARCADE MULTIPLAYER</span><h1>Desafie jogadores <span>de verdade</span>, em tempo real.</h1><p>Entre na sala do seu jogo favorito, escolha um adversário e jogue — ou assista às partidas ao vivo.</p>
   <div class="stats"><div class="stat"><b id="sOn">0</b><span>Jogadores online</span></div><div class="stat"><b id="sRo">0</b><span>Salas ativas</span></div><div class="stat"><b id="sMa">0</b><span>Partidas ao vivo</span></div></div>
-  <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap"><a class="btn primary" href="#catalogo" onclick="document.getElementById('catalogo').scrollIntoView();return false">${ic('play')} Ver jogos</a><a class="btn" href="#/controls">${ic('pad')} Configurar controles</a></div></div>
+  <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap"><a class="btn primary" href="#catalogo" id="goCat">${ic('play')} Ver jogos</a><a class="btn" href="#/controls">${ic('pad')} Configurar controles</a></div></div>
   ${hero ? `<div class="feat" data-g="${hero.id}">${hero.cover_url ? `<img src="${esc(hero.cover_url)}" alt="">` : '<div class="cv"></div>'}<div class="ov"><span class="eyebrow">EM DESTAQUE</span><h2>${esc(hero.title)}</h2><p>${esc(hero.platform)} · ${esc(hero.category)}</p></div></div>` : '<div class="feat" style="display:grid;place-items:center"><p>Nenhum jogo publicado ainda.</p></div>'}</section>
   <div class="sec" id="catalogo"><h2>Catálogo</h2><div class="filters"><input id="q" placeholder="Pesquisar jogo…" value="${esc(S.filters.q)}"><select id="cat"><option value="">Todas as categorias</option>${cats.map(c => `<option ${S.filters.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select><select id="plat"><option value="">Todas as plataformas</option>${plats.map(c => `<option ${S.filters.plat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div></div>
   <div class="grid" id="grid"></div>`;
   $('#q').oninput = e => { S.filters.q = e.target.value; drawGrid(); }; $('#cat').onchange = e => { S.filters.cat = e.target.value; drawGrid(); }; $('#plat').onchange = e => { S.filters.plat = e.target.value; drawGrid(); };
   $('.feat[data-g]')?.addEventListener('click', e => location.hash = '#/room/' + e.currentTarget.dataset.g);
+  $('#goCat')?.addEventListener('click', e => { e.preventDefault(); $('#catalogo').scrollIntoView({ behavior: 'smooth' }); });
   drawGrid(); updateHomeStats();
 }
 function updateHomeStats() { if (!$('#sOn')) return; $('#sOn').textContent = S.stats.online; $('#sRo').textContent = S.stats.rooms.length; $('#sMa').textContent = S.stats.matches; drawGrid(true); }
