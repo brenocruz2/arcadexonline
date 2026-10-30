@@ -38,7 +38,7 @@ app.use('/api', (_q, res) => res.status(404).json({ error: 'Rota não encontrada
 
 app.use('/uploads', express.static(cfg.uploadDir, { maxAge: '7d', index: false, setHeaders: r => r.setHeader('X-Content-Type-Options', 'nosniff') }));
 // Área administrativa: rota própria, sem nenhum link na página pública. A proteção real está na API (/api/admin).
-app.use('/admin', (_q, res, next) => { res.setHeader('X-Robots-Tag', 'noindex, nofollow'); next(); }, express.static(adminDir));
+app.use('/admin', (_q, res, next) => { res.setHeader('X-Robots-Tag', 'noindex, nofollow'); next(); }, express.static(adminDir, { setHeaders: (res, file) => { if (/\\.(?:html|js|css)$/i.test(file)) res.setHeader('Content-Type', file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8'); } }));
 app.use(express.static(publicDir));
 app.get(/^\/(?!api|admin|uploads|socket\.io).*/, (_q, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
