@@ -150,14 +150,14 @@ r.delete('/users/:id', adminOnly, wrap(async (req, res) => {
 const ASSET_BUCKET = 'arcadex-emulator-assets';
 const assetUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 128 * 1048576, files: 1 },
+  limits: { fileSize: 64 * 1048576, files: 1 },
 }).single('file');
 const assetKinds = {
   core: new Set(['.zip', '.wasm', '.data', '.js', '.mjs', '.json']),
   bios: new Set(['.zip', '.bin', '.rom', '.bios', '.rom1', '.rom2']),
 };
 async function ensureAssetBucket() {
-  const { error } = await sb.storage.createBucket(ASSET_BUCKET, { public: false, fileSizeLimit: 128 * 1048576 });
+  const { error } = await sb.storage.createBucket(ASSET_BUCKET, { public: false, fileSizeLimit: 64 * 1048576 });
   if (error && !/already exists|duplicate/i.test(error.message || '')) {
     const { data } = await sb.storage.getBucket(ASSET_BUCKET);
     if (!data) throw error;
