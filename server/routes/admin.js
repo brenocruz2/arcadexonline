@@ -110,6 +110,19 @@ r.get('/users/:id', staff, wrap(async (req, res) => {
   const { data: au } = await sb.auth.admin.getUserById(req.params.id);
   res.json({ profile, email: au?.user?.email, access, matches, reports });
 }));
+r.post('/users/:id/password', adminOnly, wrap(async (req, res) => {
+  if (!uuid.safeParse(req.params.id).success) return res.status(400).json({ error: 'ID inválido' });
+  const d = parse(z.object({ password: z.string().min(8).max(72) }), req.body, res); if (!d) return;
+  const { data: target } = await sb.from('profiles').select('role').eq('id', req.params.id).maybeSingle();
+  if (!target) return res.status(404).json({ error: 'Usuário não encontrado' });
+  if (target.role === 'admin' && req.user.profile.role !== 'admin') return res.status(403).json({ error: 'Somente um administrador pode alterar esta senha' });
+  const { error } = await sb.auth.admin.updateUserById(req.params.id, { password: d.password });
+  if (error) return res.status(400).json({ error: 'Não foi possível atualizar a senha' });
+  invalidateUserCache();
+  await audit(req.user.id, 'user.password.update', req.params.id, { changed: true }, req.ip);
+  res.json({ ok: true });
+}));
+
 r.post('/users/:id/ban', staff, wrap(async (req, res) => {
   const d = parse(z.object({ banned: z.boolean(), reason: z.string().max(300).optional() }), req.body, res); if (!d) return;
   const { data: t } = await sb.from('profiles').select('role').eq('id', req.params.id).single();
@@ -131,6 +144,55 @@ r.delete('/users/:id', adminOnly, wrap(async (req, res) => {
   const { error } = await sb.auth.admin.deleteUser(req.params.id);
   if (error) return res.status(400).json({ error: 'Falha ao remover conta' });
   invalidateUserCache(); await audit(req.user.id, 'user.delete', req.params.id, null, req.ip); res.json({ ok: true });
+}));
+
+// ---------- Arquivos do emulador: núcleos e BIOS (Supabase Storage privado) ----------
+const ASSET_BUCKET = 'arcadex-emulator-assets';
+const assetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 128 * 1048576, files: 1 },
+}).single('file');
+const assetKinds = {
+  core: new Set(['.zip', '.wasm', '.data', '.js', '.mjs', '.json']),
+  bios: new Set(['.zip', '.bin', '.rom', '.bios', '.rom1', '.rom2']),
+};
+async function ensureAssetBucket() {
+  const { error } = await sb.storage.createBucket(ASSET_BUCKET, { public: false, fileSizeLimit: 128 * 1048576 });
+  if (error && !/already exists|duplicate/i.test(error.message || '')) {
+    const { data } = await sb.storage.getBucket(ASSET_BUCKET);
+    if (!data) throw error;
+  }
+}
+r.get('/assets/:kind', adminOnly, wrap(async (req, res) => {
+  const kind = req.params.kind;
+  if (!assetKinds[kind]) return res.status(400).json({ error: 'Categoria inválida' });
+  await ensureAssetBucket();
+  const { data, error } = await sb.storage.from(ASSET_BUCKET).list(kind, { limit: 200, sortBy: { column: 'name', order: 'asc' } });
+  if (error) throw error;
+  res.json((data || []).filter(x => x.name && x.id).map(x => ({ name: x.name, size: x.metadata?.size || 0, updated_at: x.updated_at })));
+}));
+r.post('/assets/:kind', adminOnly, (req, res, next) => assetUpload(req, res, e => e ? res.status(400).json({ error: e.message }) : next()), wrap(async (req, res) => {
+  const kind = req.params.kind;
+  if (!assetKinds[kind]) return res.status(400).json({ error: 'Categoria inválida' });
+  if (!req.file) return res.status(400).json({ error: 'Selecione um arquivo' });
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  if (!assetKinds[kind].has(ext)) return res.status(400).json({ error: 'Extensão não permitida para esta categoria' });
+  await ensureAssetBucket();
+  const safeName = path.basename(req.file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100);
+  const objectPath = kind + '/' + crypto.randomUUID() + '-' + safeName;
+  const { error } = await sb.storage.from(ASSET_BUCKET).upload(objectPath, req.file.buffer, { contentType: req.file.mimetype || 'application/octet-stream', upsert: false });
+  if (error) return res.status(400).json({ error: 'Falha ao armazenar arquivo no Supabase Storage' });
+  await audit(req.user.id, kind === 'core' ? 'emulator.core.upload' : 'emulator.bios.upload', objectPath, { name: safeName, size: req.file.size }, req.ip);
+  res.json({ ok: true, path: objectPath, name: safeName, size: req.file.size });
+}));
+r.delete('/assets/:kind/:name', adminOnly, wrap(async (req, res) => {
+  const kind = req.params.kind;
+  if (!assetKinds[kind] || req.params.name.includes('/') || req.params.name.includes('..')) return res.status(400).json({ error: 'Arquivo inválido' });
+  await ensureAssetBucket();
+  const { error } = await sb.storage.from(ASSET_BUCKET).remove([kind + '/' + req.params.name]);
+  if (error) return res.status(400).json({ error: 'Falha ao excluir arquivo' });
+  await audit(req.user.id, 'emulator.asset.delete', kind + '/' + req.params.name, null, req.ip);
+  res.json({ ok: true });
 }));
 
 // ---------- Denúncias ----------
