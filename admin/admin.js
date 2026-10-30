@@ -31,22 +31,22 @@ async function boot() {
   sb.auth.onAuthStateChange((_e, s) => { if (s) token = s.access_token; });
 }
 function login(msg = '') {
-  $('#app').innerHTML = `<div class="modal"><div class="box"><h2>Administração</h2><p>Acesso restrito.</p><label for="em">E-mail</label><input id="em" type="email" autocomplete="username" style="color:#eef1fa!important;opacity:1;visibility:visible"><label for="pw">Senha</label><div style="display:flex;gap:8px;align-items:stretch"><input id="pw" type="password" autocomplete="current-password" spellcheck="false" style="flex:1;min-width:0;color:#eef1fa!important;-webkit-text-fill-color:#eef1fa!important;caret-color:#5aa2ff!important;opacity:1;visibility:visible;-webkit-text-security:disc"><button class="btn" id="togglePw" type="button" aria-label="Mostrar senha" style="flex:none">Mostrar</button></div><p style="color:var(--bad);min-height:20px" id="m">${esc(msg)}</p><button class="btn primary" id="go" style="width:100%;justify-content:center">Entrar</button></div></div>`;
+  $('#app').innerHTML = `<div class="modal"><div class="box"><h2>Administração</h2><p>Acesso restrito.</p><label for="em">E-mail</label><input id="em" type="email" autocomplete="username" style="color:#eef1fa!important;opacity:1;visibility:visible"><label for="pw">Senha</label><div style="display:flex;gap:8px;align-items:stretch"><input id="pw" type="password" autocomplete="current-password" spellcheck="false" style="flex:1;min-width:0;color:#eef1fa!important;-webkit-text-fill-color:#eef1fa!important;caret-color:#5aa2ff!important;opacity:1;visibility:visible"><button class="btn" id="togglePw" type="button" aria-label="Mostrar senha" style="flex:none">Mostrar</button></div><p style="color:var(--bad);min-height:20px" id="m">${esc(msg)}</p><button class="btn primary" id="go" style="width:100%;justify-content:center">Entrar</button></div></div>`;
   const pw = $('#pw');
-  $('#togglePw').onclick = () => { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; pw.style.webkitTextSecurity = show ? 'none' : 'disc'; $('#togglePw').textContent = show ? 'Ocultar' : 'Mostrar'; $('#togglePw').setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha'); pw.focus(); };
+  $('#togglePw').onclick = () => { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; $('#togglePw').textContent = show ? 'Ocultar' : 'Mostrar'; $('#togglePw').setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha'); pw.focus(); };
   const go = async () => { const { data, error } = await sb.auth.signInWithPassword({ email: $('#em').value.trim(), password: pw.value }); if (error) return $('#m').textContent = 'Credenciais inválidas'; token = data.session.access_token; enter(); };
   $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
 }
 async function enter() {
   try { me = await api('/me'); } catch (e) { await sb.auth.signOut(); return login('Sem permissão administrativa.'); }
   $('#app').innerHTML = `<div class="shell"><aside><h3 style="padding:6px 12px 14px">ARCADE<b style="color:var(--blue2)">X</b> Admin</h3><div id="nav"></div><p style="padding:12px;font-size:12px">${esc(me.name)} · ${me.role}</p><a id="so">Sair</a></aside><main id="main"></main></div>`;
-  const isA = me.role === 'admin'; const tabs = [['dash', 'Dashboard'], ...(isA ? [['games', 'Jogos']] : []), ['users', 'Usuários'], ['rooms', 'Salas e partidas'], ['reports', 'Denúncias'], ['errors', 'Erros'], ...(isA ? [['audit', 'Auditoria'], ['settings', 'Configurações']] : [])];
+  const isA = me.role === 'admin'; const tabs = [['dash', 'Dashboard'], ...(isA ? [['games', 'Jogos']] : []), ['users', 'Usuários'], ['rooms', 'Salas e partidas'], ['reports', 'Denúncias'], ['errors', 'Erros'], ...(isA ? [['assets', 'Núcleos e BIOS'], ['audit', 'Auditoria'], ['settings', 'Configurações']] : [])];
   $('#nav').innerHTML = tabs.map(([k, l]) => `<a data-t="${k}">${l}</a>`).join(''); $('#nav').querySelectorAll('a').forEach(a => a.onclick = () => show(a.dataset.t));
   $('#so').onclick = async () => { await sb.auth.signOut(); location.reload(); };
   setInterval(async () => { const { data } = await sb.auth.getSession(); if (data.session) token = data.session.access_token; }, 60000);
   show('dash');
 }
-function show(t) { tab = t; clearInterval(timer); document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.t === t)); ({ dash, games, users, rooms, reports, errors, audit, settings })[t](); }
+function show(t) { tab = t; clearInterval(timer); document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.t === t)); ({ dash, games, users, rooms, reports, errors, audit, settings, assets })[t](); }
 const main = h => $('#main').innerHTML = h;
 const table = (cols, rows) => `<div class="scroll"><table><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${cols.length}">Sem registros.</td></tr>`}</tbody></table></div>`;
 const dt = s => s ? new Date(s).toLocaleString('pt-BR') : '—';
@@ -98,7 +98,43 @@ async function users() {
   document.querySelectorAll('[data-r]').forEach(s => s.onchange = async () => { await act(() => api(`/users/${s.dataset.r}/role`, { method: 'POST', body: { role: s.value } }), 'Permissão alterada'); users(); });
   document.querySelectorAll('[data-x]').forEach(b => b.onclick = async () => { if (confirm('Remover esta conta definitivamente?')) { await act(() => api('/users/' + b.dataset.x, { method: 'DELETE' }), 'Conta removida'); users(); } });
   document.querySelectorAll('[data-v]').forEach(b => b.onclick = async () => { const d = await act(() => api('/users/' + b.dataset.v)); if (!d) return;
-    $('#modal').innerHTML = `<div class="modal"><div class="box" style="width:min(720px,100%)"><h2>${esc(d.profile.display_name)}</h2><p>${esc(d.email)} · cadastro ${dt(d.profile.created_at)}</p><h3 style="margin-top:12px">Acessos</h3>${table(['Evento', 'IP', 'Data'], d.access.map(a => `<tr><td>${a.event}</td><td>${esc(a.ip)}</td><td>${dt(a.created_at)}</td></tr>`))}<h3 style="margin-top:12px">Partidas</h3>${table(['Jogo', 'Início', 'Fim', 'Motivo'], d.matches.map(m => `<tr><td>${esc(m.game_sessions?.games?.title)}</td><td>${dt(m.game_sessions?.started_at)}</td><td>${dt(m.game_sessions?.ended_at)}</td><td>${esc(m.game_sessions?.end_reason)}</td></tr>`))}<h3 style="margin-top:12px">Denúncias recebidas</h3>${table(['Motivo', 'Status', 'Data'], d.reports.map(x => `<tr><td>${esc(x.reason)}</td><td>${x.status}</td><td>${dt(x.created_at)}</td></tr>`))}<button class="btn" id="cx" style="margin-top:14px">Fechar</button></div></div>`; $('#cx').onclick = () => $('#modal').innerHTML = ''; });
+    $('#modal').innerHTML = `<div class="modal"><div class="box" style="width:min(720px,100%)"><h2>${esc(d.profile.display_name)}</h2><p>${esc(d.email)} · cadastro ${dt(d.profile.created_at)}</p><h3 style="margin-top:12px">Acessos</h3>${table(['Evento', 'IP', 'Data'], d.access.map(a => `<tr><td>${a.event}</td><td>${esc(a.ip)}</td><td>${dt(a.created_at)}</td></tr>`))}<h3 style="margin-top:12px">Partidas</h3>${table(['Jogo', 'Início', 'Fim', 'Motivo'], d.matches.map(m => `<tr><td>${esc(m.game_sessions?.games?.title)}</td><td>${dt(m.game_sessions?.started_at)}</td><td>${dt(m.game_sessions?.ended_at)}</td><td>${esc(m.game_sessions?.end_reason)}</td></tr>`))}<h3 style="margin-top:12px">Denúncias recebidas</h3>${table(['Motivo', 'Status', 'Data'], d.reports.map(x => `<tr><td>${esc(x.reason)}</td><td>${x.status}</td><td>${dt(x.created_at)}</td></tr>`))}<div class="panel" style="margin-top:14px"><h3>Segurança da conta</h3><label>Nova senha (mínimo 8 caracteres)</label><input id="newUserPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Digite a nova senha"><button class="btn primary" id="changeUserPassword" style="margin-top:10px">Alterar senha</button></div><button class="btn" id="cx" style="margin-top:14px">Fechar</button></div></div>`; $('#changeUserPassword').onclick = async () => { const password = $('#newUserPassword').value; if (password.length < 8) return toast('A senha deve ter pelo menos 8 caracteres.', 'err'); if (!confirm('Confirma a alteração da senha deste usuário?')) return; const done = await act(() => api('/users/' + b.dataset.v + '/password', { method: 'POST', body: { password } }), 'Senha alterada com sucesso.'); if (done) $('#newUserPassword').value = ''; }; $('#cx').onclick = () => $('#modal').innerHTML = ''; });
+}
+
+async function assets() {
+  const [cores, bios] = await Promise.all([
+    act(() => api('/assets/core')),
+    act(() => api('/assets/bios'))
+  ]);
+  if (!cores || !bios) return;
+  const fmt = n => n ? (n / 1048576).toFixed(2) + ' MB' : '—';
+  const rows = (kind, arr) => arr.map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${fmt(x.size)}</td><td>${dt(x.updated_at)}</td><td><button class="btn sm danger" data-del-asset="${kind}" data-name="${esc(x.name)}">Excluir</button></td></tr>`).join('');
+  main(`<h2>Núcleos de emulação e BIOS</h2>
+    <p class="meta">Arquivos guardados no Supabase Storage privado, fora do disco temporário do Fly.io.</p>
+    <div class="cols3" style="margin-top:14px">
+      <div class="panel"><h3>Enviar núcleo</h3><p class="meta">Pacotes .zip ou arquivos .wasm, .data, .js, .mjs e .json (até 128 MB).</p><input id="coreFile" type="file" accept=".zip,.wasm,.data,.js,.mjs,.json"><button class="btn primary" id="uploadCore" style="margin-top:10px">Enviar núcleo</button></div>
+      <div class="panel"><h3>Enviar BIOS</h3><p class="meta">Arquivos .zip, .bin, .rom e .bios (até 128 MB). Envie apenas arquivos que você tem direito de usar.</p><input id="biosFile" type="file" accept=".zip,.bin,.rom,.bios,.rom1,.rom2"><button class="btn primary" id="uploadBios" style="margin-top:10px">Enviar BIOS</button></div>
+    </div>
+    <div class="panel" style="margin-top:14px"><h3>Núcleos cadastrados (${cores.length})</h3>${table(['Arquivo','Tamanho','Atualizado',''], rows('core', cores))}</div>
+    <div class="panel" style="margin-top:14px"><h3>BIOS cadastradas (${bios.length})</h3>${table(['Arquivo','Tamanho','Atualizado',''], rows('bios', bios))}</div>
+    <p class="meta">Observação: o envio e o armazenamento ficam disponíveis nesta biblioteca. A seleção de um núcleo/BIOS no jogo e a execução de núcleos personalizados ainda dependem da compatibilidade do carregador EmulatorJS e não são ativadas automaticamente pelo upload.</p>`);
+  const send = async (kind, id) => {
+    const f = $('#' + id).files[0]; if (!f) return toast('Selecione um arquivo primeiro.', 'err');
+    const fd = new FormData(); fd.append('file', f);
+    const result = await act(() => new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest(); x.open('POST', '/api/admin/assets/' + kind); x.setRequestHeader('Authorization', 'Bearer ' + token);
+      x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch {} x.status < 300 ? resolve(j) : reject(new Error(j.error || 'Falha no envio')); };
+      x.onerror = () => reject(new Error('Falha de rede')); x.send(fd);
+    }), 'Arquivo enviado para o Supabase Storage.');
+    if (result) assets();
+  };
+  $('#uploadCore').onclick = () => send('core', 'coreFile');
+  $('#uploadBios').onclick = () => send('bios', 'biosFile');
+  document.querySelectorAll('[data-del-asset]').forEach(b => b.onclick = async () => {
+    if (!confirm('Excluir este arquivo permanentemente?')) return;
+    const result = await act(() => api('/assets/' + b.dataset.delAsset + '/' + encodeURIComponent(b.dataset.name), { method: 'DELETE' }), 'Arquivo excluído.');
+    if (result) assets();
+  });
 }
 
 async function rooms() {
