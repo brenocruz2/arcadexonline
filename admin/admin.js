@@ -31,8 +31,10 @@ async function boot() {
   sb.auth.onAuthStateChange((_e, s) => { if (s) token = s.access_token; });
 }
 function login(msg = '') {
-  $('#app').innerHTML = `<div class="modal"><div class="box"><h2>Administração</h2><p>Acesso restrito.</p><label>E-mail</label><input id="em" type="email"><label>Senha</label><input id="pw" type="password"><p style="color:var(--bad);min-height:20px" id="m">${esc(msg)}</p><button class="btn primary" id="go" style="width:100%;justify-content:center">Entrar</button></div></div>`;
-  const go = async () => { const { data, error } = await sb.auth.signInWithPassword({ email: $('#em').value.trim(), password: $('#pw').value }); if (error) return $('#m').textContent = 'Credenciais inválidas'; token = data.session.access_token; enter(); };
+  $('#app').innerHTML = `<div class="modal"><div class="box"><h2>Administração</h2><p>Acesso restrito.</p><label for="em">E-mail</label><input id="em" type="email" autocomplete="username" style="color:#eef1fa!important;opacity:1;visibility:visible"><label for="pw">Senha</label><div style="display:flex;gap:8px;align-items:stretch"><input id="pw" type="password" autocomplete="current-password" spellcheck="false" style="flex:1;min-width:0;color:#eef1fa!important;-webkit-text-fill-color:#eef1fa!important;caret-color:#5aa2ff!important;opacity:1;visibility:visible;-webkit-text-security:disc"><button class="btn" id="togglePw" type="button" aria-label="Mostrar senha" style="flex:none">Mostrar</button></div><p style="color:var(--bad);min-height:20px" id="m">${esc(msg)}</p><button class="btn primary" id="go" style="width:100%;justify-content:center">Entrar</button></div></div>`;
+  const pw = $('#pw');
+  $('#togglePw').onclick = () => { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; pw.style.webkitTextSecurity = show ? 'none' : 'disc'; $('#togglePw').textContent = show ? 'Ocultar' : 'Mostrar'; $('#togglePw').setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha'); pw.focus(); };
+  const go = async () => { const { data, error } = await sb.auth.signInWithPassword({ email: $('#em').value.trim(), password: pw.value }); if (error) return $('#m').textContent = 'Credenciais inválidas'; token = data.session.access_token; enter(); };
   $('#go').onclick = go; $('#pw').onkeydown = e => e.key === 'Enter' && go();
 }
 async function enter() {
