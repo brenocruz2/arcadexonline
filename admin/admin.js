@@ -114,8 +114,8 @@ async function assets() {
   main(`<h2>Núcleos de emulação e BIOS</h2>
     <p class="meta">Arquivos guardados no Supabase Storage privado, fora do disco temporário do Fly.io.</p>
     <div class="cols3" style="margin-top:14px">
-      <div class="panel"><h3>Enviar núcleo</h3><p class="meta">Pacotes .zip ou arquivos .wasm, .data, .js, .mjs e .json (até 128 MB).</p><input id="coreFile" type="file" accept=".zip,.wasm,.data,.js,.mjs,.json"><button class="btn primary" id="uploadCore" style="margin-top:10px">Enviar núcleo</button></div>
-      <div class="panel"><h3>Enviar BIOS</h3><p class="meta">Arquivos .zip, .bin, .rom e .bios (até 128 MB). Envie apenas arquivos que você tem direito de usar.</p><input id="biosFile" type="file" accept=".zip,.bin,.rom,.bios,.rom1,.rom2"><button class="btn primary" id="uploadBios" style="margin-top:10px">Enviar BIOS</button></div>
+      <div class="panel"><h3>Enviar núcleo</h3><p class="meta">Pacotes .zip ou arquivos .wasm, .data, .js, .mjs e .json (até 64 MB).</p><input id="coreFile" type="file" accept=".zip,.wasm,.data,.js,.mjs,.json"><button class="btn primary" id="uploadCore" style="margin-top:10px">Enviar núcleo</button></div>
+      <div class="panel"><h3>Enviar BIOS</h3><p class="meta">Arquivos .zip, .bin, .rom e .bios (até 64 MB). Envie apenas arquivos que você tem direito de usar.</p><input id="biosFile" type="file" accept=".zip,.bin,.rom,.bios,.rom1,.rom2"><button class="btn primary" id="uploadBios" style="margin-top:10px">Enviar BIOS</button></div>
     </div>
     <div class="panel" style="margin-top:14px"><h3>Núcleos cadastrados (${cores.length})</h3>${table(['Arquivo','Tamanho','Atualizado',''], rows('core', cores))}</div>
     <div class="panel" style="margin-top:14px"><h3>BIOS cadastradas (${bios.length})</h3>${table(['Arquivo','Tamanho','Atualizado',''], rows('bios', bios))}</div>
