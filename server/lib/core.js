@@ -12,7 +12,40 @@ export const cfg = {
   uploadDir: path.resolve(process.env.UPLOAD_DIR || './storage/uploads'),
   maxConnections: Number(process.env.MAX_CONNECTIONS || 300),
 };
-for (const d of [cfg.romDir, path.join(cfg.uploadDir, 'covers')]) fs.mkdirSync(d, { recursive: true });
+// No Fly.io, o caminho público /app/retroarch/cores/roms é um link para o volume persistente.
+if (process.env.ROM_DIR === '/app/retroarch/cores/roms') {
+  const persistentRomDir = '/app/storage/retroarch/cores/roms';
+  const legacyRomDir = '/app/storage/roms';
+  fs.mkdirSync(persistentRomDir, { recursive: true });
+
+  // Migra ROMs antigas sem sobrescrever arquivos que já estejam no novo destino.
+  if (fs.existsSync(legacyRomDir)) {
+    for (const name of fs.readdirSync(legacyRomDir)) {
+      const from = path.join(legacyRomDir, name);
+      const to = path.join(persistentRomDir, name);
+      if (!fs.existsSync(to)) fs.cpSync(from, to, { recursive: true, force: false, errorOnExist: false });
+    }
+  }
+
+  fs.mkdirSync(path.dirname(cfg.romDir), { recursive: true });
+  if (fs.existsSync(cfg.romDir)) {
+    const current = fs.lstatSync(cfg.romDir);
+    if (!current.isSymbolicLink()) {
+      for (const name of fs.readdirSync(cfg.romDir)) {
+        const from = path.join(cfg.romDir, name);
+        const to = path.join(persistentRomDir, name);
+        if (!fs.existsSync(to)) fs.cpSync(from, to, { recursive: true, force: false, errorOnExist: false });
+      }
+      fs.rmSync(cfg.romDir, { recursive: true, force: true });
+      fs.symlinkSync(persistentRomDir, cfg.romDir, 'dir');
+    }
+  } else {
+    fs.symlinkSync(persistentRomDir, cfg.romDir, 'dir');
+  }
+} else {
+  fs.mkdirSync(cfg.romDir, { recursive: true });
+}
+fs.mkdirSync(path.join(cfg.uploadDir, 'covers'), { recursive: true });
 
 export const configured = Boolean(cfg.supabaseUrl && cfg.anon && cfg.service);
 // Gancho SOMENTE para testes automatizados (banco em memória). Nunca definir em produção.
