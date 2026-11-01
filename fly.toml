@@ -12,6 +12,7 @@ primary_region = 'gru'
 [env]
   ALLOWED_ORIGIN = 'https://arcadexonline.fly.dev'
   NODE_ENV = 'production'
+  ROM_DIR = '/app/retroarch/cores/roms'
 
 [[mounts]]
   source = 'storage'
